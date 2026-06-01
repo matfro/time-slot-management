@@ -18,7 +18,7 @@ To support multi-user concurrent scheduling and prevent **Double Booking** under
 * **Crucial Edge-Case Security:** The distributed lock is acquired *before* the database transaction opens and is released in a `finally` block *strictly after* the PostgreSQL transaction is fully committed. This completely eliminates any data visibility race conditions between concurrent app threads.
 * Implements the Redisson **Watchdog** mechanism to safely auto-extend lock leases during heavy processing, mitigating deadlock risks if a cluster node crashes.
 
-![img.png](img.png)
+![distributed-lock-diagram.png](distributed-lock-diagram.png)
 
 ### 3. Multi-Tenant Data Isolation (Tenant-per-Header Pattern)
 To simulate modern, zero-trust infrastructure operating behind an API Gateway (such as Kong or Envoy), the service implements horizontal tenant isolation using the **`X-User-Id`** HTTP Header.
