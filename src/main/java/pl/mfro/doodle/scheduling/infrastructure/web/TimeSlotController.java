@@ -1,5 +1,6 @@
 package pl.mfro.doodle.scheduling.infrastructure.web;
 
+import io.micrometer.core.annotation.Timed;
 import jakarta.validation.Valid;
 import java.time.Instant;
 import java.util.List;
@@ -15,6 +16,7 @@ import pl.mfro.doodle.scheduling.domain.TimeSlot;
 import pl.mfro.doodle.scheduling.infrastructure.SchedulingMapper;
 
 @RestController
+@Timed
 @RequestMapping("/api/v1/slots")
 public class TimeSlotController {
 

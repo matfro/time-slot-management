@@ -20,5 +20,14 @@ spring:
       host: localhost
       port: 6379
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,metrics,info"
+  endpoint:
+    health:
+      show-details: always
+
 kind: Application
 
