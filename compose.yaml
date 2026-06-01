@@ -1,0 +1,48 @@
+services:
+  postgres-db:
+    image: postgres:18-alpine
+    container_name: doodle-postgres-env
+    environment:
+      POSTGRES_DB: doodle
+      POSTGRES_USER: mfro
+      POSTGRES_PASSWORD: secret_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - doodle-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mfro -d doodle"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:8.8-alpine
+    container_name: doodle-redis-env
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    container_name: doodle-app-env
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-db:5432/doodle
+      SPRING_DATASOURCE_USERNAME: mfro
+      SPRING_DATASOURCE_PASSWORD: secret_password
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  doodle-db-data:
