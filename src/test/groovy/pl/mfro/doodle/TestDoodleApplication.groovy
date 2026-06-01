@@ -1,4 +1,4 @@
-package pl.mfro.doodle;
+package pl.mfro.doodle
 
 import org.springframework.boot.SpringApplication
 

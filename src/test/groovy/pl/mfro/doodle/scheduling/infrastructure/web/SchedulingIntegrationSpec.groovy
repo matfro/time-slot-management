@@ -13,8 +13,10 @@ import pl.mfro.doodle.scheduling.infrastructure.database.TimeSlotJpaRepository
 import spock.lang.Specification
 import tools.jackson.databind.ObjectMapper
 
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -22,10 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import static org.hamcrest.Matchers.hasSize
 import static org.hamcrest.Matchers.is
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
@@ -48,6 +47,8 @@ class SchedulingIntegrationSpec extends Specification {
 
   private UUID userId = UUID.fromString("44c4b69c-29b1-4b3d-9d7a-115df6000001")
 
+  private Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS)
+
   def setup() {
     meetingRepository.deleteAll()
     timeSlotRepository.deleteAll()
@@ -56,8 +57,8 @@ class SchedulingIntegrationSpec extends Specification {
   def "should successfully create a new free timeslot when no overlap exists"() {
     given: "a valid request for a future timeslot"
     def request = new SlotCreationRequest(
-            Instant.parse("2026-06-10T12:00:00Z"),
-            Instant.parse("2026-06-10T13:00:00Z")
+            now + Duration.ofDays(1),
+            now + Duration.ofDays(1) + Duration.ofHours(1)
     )
 
     expect: "the request to succeed with HTTP 201 Created and return correct body"
@@ -75,16 +76,16 @@ class SchedulingIntegrationSpec extends Specification {
     def existingSlot = new TimeSlotEntity(
             UUID.randomUUID(),
             userId,
-            Instant.parse("2026-06-10T14:00:00Z").atZone(ZoneOffset.UTC),
-            Instant.parse("2026-06-10T15:00:00Z").atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1)).atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1) + Duration.ofHours(1)).atZone(ZoneOffset.UTC),
             true
     )
     timeSlotRepository.save(existingSlot)
 
     and: "a new request that clashes with the existing 14:00-15:00 window"
     def clashingRequest = new SlotCreationRequest(
-            Instant.parse("2026-06-10T14:30:00Z"),
-            Instant.parse("2026-06-10T15:30:00Z")
+            now + Duration.ofDays(1),
+            now + Duration.ofDays(1) + Duration.ofHours(1)
     )
 
     expect: "the system to throw a validation exception and return HTTP 400"
@@ -98,22 +99,24 @@ class SchedulingIntegrationSpec extends Specification {
   def "should aggregate and return only slots belonging to the requesting tenant within time window"() {
     given: "slots populated for two different users to verify multi-tenant data isolation"
     def otherUser = UUID.randomUUID()
+    def start = now + Duration.ofDays(1)
+    def end = start + Duration.ofHours(1)
 
-    def slotUser1 = new TimeSlotEntity(UUID.randomUUID(), userId, Instant.parse("2026-06-11T09:00:00Z").atZone(ZoneOffset.UTC), Instant.parse("2026-06-11T10:00:00Z").atZone(ZoneOffset.UTC), true,)
-    def slotUser2 = new TimeSlotEntity(UUID.randomUUID(), userId, Instant.parse("2026-06-11T11:00:00Z").atZone(ZoneOffset.UTC), Instant.parse("2026-06-11T12:00:00Z").atZone(ZoneOffset.UTC), true)
-    def slotOther = new TimeSlotEntity(UUID.randomUUID(), otherUser, Instant.parse("2026-06-11T09:30:00Z").atZone(ZoneOffset.UTC), Instant.parse("2026-06-11T10:30:00Z").atZone(ZoneOffset.UTC), true)
+    def slotUser1 = new TimeSlotEntity(UUID.randomUUID(), userId, start.atZone(ZoneOffset.UTC), end.atZone(ZoneOffset.UTC), true)
+    def slotUser2 = new TimeSlotEntity(UUID.randomUUID(), userId, (start + Duration.ofMinutes(15)).atZone(ZoneOffset.UTC), (end + Duration.ofMinutes(15)).atZone(ZoneOffset.UTC), true)
+    def slotOther = new TimeSlotEntity(UUID.randomUUID(), otherUser, start.atZone(ZoneOffset.UTC), end.atZone(ZoneOffset.UTC), true)
 
     timeSlotRepository.saveAll([slotUser1, slotUser2, slotOther])
 
     expect: "GET query to fetch exactly 2 slots belonging exclusively to the tenant in the X-User-Id header"
     mockMvc.perform(get("/api/v1/slots")
             .header("X-User-Id", userId.toString())
-            .param("from", "2026-06-11T00:00:00Z")
-            .param("to", "2026-06-12T00:00:00Z"))
+            .param("from", start.toString())
+            .param("to", (end + Duration.ofHours(2)).toString()))
             .andExpect(status().isOk())
             .andExpect(jsonPath('$', hasSize(2)))
-            .andExpect(jsonPath('$.[0].userId', is(userId.toString())))
-            .andExpect(jsonPath('$.[1].userId', is(userId.toString())))
+            .andExpect(jsonPath('$[0].userId', is(userId.toString())))
+            .andExpect(jsonPath('$[1].userId', is(userId.toString())))
   }
 
   def "should successfully update and delete an existing timeslot"() {
@@ -122,16 +125,19 @@ class SchedulingIntegrationSpec extends Specification {
     def slot = new TimeSlotEntity(
             slotId,
             userId,
-            Instant.parse("2026-06-12T10:00:00Z").atZone(ZoneOffset.UTC),
-            Instant.parse("2026-06-12T11:00:00Z").atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1)).atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1) + Duration.ofHours(1)).atZone(ZoneOffset.UTC),
             true,
     )
     timeSlotRepository.save(slot)
 
     and: "an update request to shift hours and mark as busy"
+    def newStartTime = now + Duration.ofDays(2)
+    def newEndTime = now + Duration.ofDays(2) + Duration.ofHours(1)
+
     def updateRequest = new UpdateSlotRequest(
-            Instant.parse("2026-06-12T11:00:00Z"),
-            Instant.parse("2026-06-12T12:00:00Z"),
+            newStartTime,
+            newEndTime,
             false
     )
 
@@ -145,7 +151,7 @@ class SchedulingIntegrationSpec extends Specification {
 
     then: "the slot should be updated in the repository"
     def updatedEntity = timeSlotRepository.findById(slotId).get()
-    updatedEntity.startTime.toInstant() == Instant.parse("2026-06-12T11:00:00Z")
+    updatedEntity.startTime.toInstant() == newStartTime
     !updatedEntity.isFree()
 
     when: "we execute the DELETE request to remove the slot"
@@ -163,8 +169,8 @@ class SchedulingIntegrationSpec extends Specification {
     def slot = new TimeSlotEntity(
             slotId,
             userId,
-            Instant.parse("2026-06-15T09:00:00Z").atZone(ZoneOffset.UTC),
-            Instant.parse("2026-06-15T10:00:00Z").atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1)).atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1) + Duration.ofHours(1)).atZone(ZoneOffset.UTC),
             true
     )
     timeSlotRepository.save(slot)
@@ -202,8 +208,8 @@ class SchedulingIntegrationSpec extends Specification {
     def slot = new TimeSlotEntity(
             slotId,
             userId,
-            Instant.parse("2026-06-20T10:00:00Z").atZone(ZoneOffset.UTC),
-            Instant.parse("2026-06-20T11:00:00Z").atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1)).atZone(ZoneOffset.UTC),
+            (now + Duration.ofDays(1) + Duration.ofHours(1)).atZone(ZoneOffset.UTC),
             true
     )
     timeSlotRepository.save(slot)
@@ -241,7 +247,7 @@ class SchedulingIntegrationSpec extends Specification {
           def status = result.getResponse().getStatus()
           if (status == 201) {
             successCount.incrementAndGet()
-          } else if(status == 409){
+          } else if (status == 409) {
             failureCount.incrementAndGet()
           }
         } catch (Exception e) {
